@@ -1,0 +1,1287 @@
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Reservoir Evaporation API & Visual Explorer</title>
+
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Chart.js & Markdown -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+
+    <!-- MapLibre GL CSS -->
+    <link href="https://unpkg.com/maplibre-gl@2.4.0/dist/maplibre-gl.css" rel="stylesheet" />
+    
+    <!-- Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
+    
+    <!-- Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <style>
+        :root {
+            --bg-color: #FDFDFB;
+            --text-color: #383838;
+            --primary-color: #3B82F6;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            font-family: 'Inter', sans-serif;
+        }
+
+        .font-mono { font-family: 'Fira Code', monospace; }
+
+        /* Tabs */
+        .tab.active {
+            border-bottom-color: var(--primary-color);
+            color: var(--primary-color);
+            font-weight: 600;
+        }
+
+        /* Custom Scrollbar */
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: #f1f1f1; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+        /* Loading Spinner */
+        .loading-spinner {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid #e5e7eb;
+            border-radius: 50%;
+            border-top-color: #3b82f6;
+            animation: spin 1s ease-in-out infinite;
+        }
+
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* Prose styles for docs */
+        .prose a { color: #3B82F6; text-decoration: underline; }
+        .prose p { margin-bottom: 1rem; }
+        .prose code { 
+            color: #2563EB; 
+            background-color: #EFF6FF; 
+            padding: 0.2em 0.4em; 
+            font-size: 85%; 
+            border-radius: 6px; 
+        }
+
+        /* Map Popup Styles */
+        .maplibregl-popup-content {
+            padding: 0;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            border: 1px solid #e2e8f0;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        .maplibregl-popup-close-button {
+            padding: 4px 8px;
+            color: #64748b;
+            font-size: 16px;
+        }
+        .maplibregl-popup-close-button:hover {
+            color: #0f172a;
+            background-color: #f1f5f9;
+            border-top-right-radius: 8px;
+        }
+
+        /* API Explorer Specifics */
+        .endpoint-header:hover .arrow-icon { transform: rotate(180deg); }
+        .arrow-icon { transition: transform 0.2s; }
+    </style>
+</head>
+
+<body class="antialiased flex flex-col min-h-screen relative">
+
+    <div class="max-w-screen-2xl mx-auto px-4 sm:px-6 lg:px-8 w-full flex-grow flex flex-col">
+        
+        <!-- Header -->
+        <header class="py-8 border-b border-gray-200">
+            <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div>
+                    <h1 class="text-3xl font-bold text-gray-900">Reservoir Evaporation Explorer</h1>
+                    <p class="text-sm text-gray-600 mt-1">
+                        Historical and real-time daily evaporation estimates for Western US reservoirs.
+                    </p>
+                </div>
+                <!-- Global Settings (Key/URL) -->
+                <div class="flex items-end gap-2 bg-gray-50 p-3 rounded-lg border border-gray-200">
+                    <div>
+                        <label class="block text-[10px] uppercase font-bold text-gray-500 mb-1">API Key</label>
+                        <div class="flex">
+                            <input type="password" id="global-api-key" placeholder="Enter Key..." 
+                                class="w-32 text-xs p-2 border border-gray-300 rounded-l focus:ring-blue-500 focus:border-blue-500 font-mono">
+                            <button id="copy-api-key" class="bg-gray-200 hover:bg-gray-300 text-gray-600 px-2 rounded-r border-y border-r border-gray-300 text-xs" title="Copy Key">
+                                <i data-lucide="copy" class="w-3 h-3"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-[10px] uppercase font-bold text-gray-500 mb-1">Base URL</label>
+                        <input type="text" id="api-base-url" value="https://operevap.dri.edu" 
+                            class="w-48 text-xs p-2 border border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500 font-mono">
+                    </div>
+                    <button id="save-settings" class="bg-blue-600 hover:bg-blue-700 text-white p-2 rounded text-xs font-semibold h-[34px]">
+                        Save
+                    </button>
+                </div>
+            </div>
+            <div id="settings-status" class="text-xs text-green-600 text-right mt-1 hidden">Settings saved.</div>
+        </header>
+
+        <!-- Navigation Tabs -->
+        <div class="border-b border-gray-200 mt-6 sticky top-0 bg-[var(--bg-color)] z-30">
+            <nav class="flex space-x-8" aria-label="Tabs">
+                <button class="tab active py-4 px-1 border-b-2 border-transparent font-medium text-sm hover:text-gray-700"
+                    data-tab-target="#visual-explorer">Visual Explorer</button>
+                <button class="tab py-4 px-1 border-b-2 border-transparent font-medium text-sm text-gray-500 hover:text-gray-700"
+                    data-tab-target="#api-explorer">API Explorer</button>
+                <button class="tab py-4 px-1 border-b-2 border-transparent font-medium text-sm text-gray-500 hover:text-gray-700"
+                    data-tab-target="#get-access">Get Access</button>
+            </nav>
+        </div>
+
+        <!-- TAB CONTENT: VISUAL EXPLORER -->
+        <div id="visual-explorer" class="tab-content py-6 flex-grow">
+            <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 h-[calc(100vh-280px)] min-h-[600px]">
+                
+                <!-- Left Panel: Controls -->
+                <div class="lg:col-span-4 flex flex-col h-full bg-white border border-gray-200 rounded-lg shadow-sm overflow-hidden z-10">
+                    <div class="p-4 border-b border-gray-100 bg-gray-50">
+                        <h2 class="font-semibold text-gray-800 flex items-center gap-2">
+                            <i data-lucide="settings-2" class="w-4 h-4"></i> Query Configuration
+                        </h2>
+                    </div>
+                    
+                    <div class="flex-1 overflow-y-auto p-4 space-y-6 custom-scrollbar">
+                        
+                        <!-- 1. Selected Reservoirs -->
+                        <div>
+                            <div class="flex justify-between items-center mb-2">
+                                <label class="block text-sm font-medium text-gray-700">Selected Reservoirs <span id="res-count" class="text-xs bg-blue-100 text-blue-800 px-2 py-0.5 rounded-full ml-1">0</span></label>
+                                <button id="clear-selection" class="text-xs text-red-600 hover:text-red-800 hover:underline hidden">Clear All</button>
+                            </div>
+                            <div id="selected-reservoirs-list" class="min-h-[60px] p-2 bg-gray-50 rounded border border-gray-200 text-xs text-gray-500 flex flex-wrap gap-2">
+                                <span class="italic p-1">Select reservoirs on the map...</span>
+                            </div>
+                        </div>
+
+                        <!-- 2. Dataset Selection -->
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">Dataset</label>
+                            <select id="viz-dataset" class="w-full p-2 border border-gray-300 rounded text-sm focus:ring-blue-500 focus:border-blue-500 bg-white">
+                                <option value="" disabled selected>Select a dataset...</option>
+                                <option value="all">All Datasets</option>
+                                <option value="res">Reservoir Properties (res)</option>
+                                <option value="nete-volume-calcs">Volume Calculations (nete-volume-calcs)</option>
+                                <option value="lem">Lake Evaporation Model (lem)</option>
+                                <option value="rtma">Meteorological Data (rtma)</option>
+                            </select>
+                        </div>
+
+                        <!-- 3. Variables Selection -->
+                        <div id="viz-variables-container" class="opacity-50 pointer-events-none transition-opacity">
+                            <label class="block text-sm font-medium text-gray-700 mb-2">Variables</label>
+                            <div id="viz-variables-list" class="grid grid-cols-2 gap-2 text-sm bg-gray-50 p-3 rounded border border-gray-200 max-h-40 overflow-y-auto custom-scrollbar">
+                                <!-- Checkboxes populated by JS -->
+                            </div>
+                            <div class="mt-1 flex gap-2">
+                                <button id="select-all-vars" class="text-[10px] text-blue-600 hover:underline">Select All</button>
+                                <button id="deselect-all-vars" class="text-[10px] text-blue-600 hover:underline">Deselect All</button>
+                            </div>
+                        </div>
+
+                        <!-- 4. Date Range -->
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Start Date</label>
+                                <input type="date" id="viz-start-date" value="2020-01-01" min="1980-01-01" max="2026-02-07"
+                                    class="w-full p-2 border border-gray-300 rounded text-sm focus:ring-blue-500 focus:border-blue-500">
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">End Date</label>
+                                <input type="date" id="viz-end-date" value="2020-01-31" min="1980-01-01" max="2026-02-07"
+                                    class="w-full p-2 border border-gray-300 rounded text-sm focus:ring-blue-500 focus:border-blue-500">
+                            </div>
+                        </div>
+
+                    </div>
+
+                    <div class="p-4 border-t border-gray-200 bg-gray-50">
+                        <button id="run-visual-query" class="w-full bg-blue-600 text-white py-2 px-4 rounded-lg font-medium hover:bg-blue-700 transition flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
+                            <i data-lucide="play" class="w-4 h-4"></i>
+                            Fetch Time Series
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Right Panel: Map & Results -->
+                <div class="lg:col-span-8 flex flex-col gap-6 h-full overflow-y-auto custom-scrollbar">
+                    
+                    <!-- Map Component -->
+                    <div id="map-wrapper" class="w-full h-[500px] bg-gray-100 rounded-lg border border-gray-200 shadow-sm relative shrink-0 overflow-hidden">
+                        <div id="map" class="w-full h-full rounded-lg"></div>
+                        
+                        <!-- Floating Map Controls (Reset View) -->
+                        <div class="absolute top-4 right-4 z-10">
+                            <div class="bg-white rounded-lg shadow-lg p-1 border border-slate-200">
+                                <button id="resetView" class="p-2 hover:bg-slate-50 rounded-md transition-colors text-slate-600" title="Reset Map View">
+                                    <i data-lucide="home" class="w-5 h-5"></i>
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Map Legend / Info -->
+                        <div class="absolute bottom-4 right-12 bg-white/90 backdrop-blur p-3 rounded shadow-md text-xs z-10">
+                            <div class="flex items-center gap-2 mb-1">
+                                <span class="w-3 h-3 bg-[#4f46e5] opacity-50 block border border-[#4f46e5]"></span>
+                                <span>Reservoir (Filtered)</span>
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <span class="w-3 h-3 bg-[#db2777] block border border-[#be185d]"></span>
+                                <span>Selected</span>
+                            </div>
+                        </div>
+
+                        <!-- Loader for Map -->
+                        <div id="map-loader" class="absolute inset-0 flex items-center justify-center bg-white/80 z-20">
+                            <div class="text-center">
+                                <div class="loading-spinner w-8 h-8 border-t-indigo-600 mb-2 mx-auto"></div>
+                                <span class="text-sm font-medium text-gray-600">Loading Map Data...</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Results Area -->
+                    <div id="visual-results" class="bg-white rounded-lg border border-gray-200 shadow-sm p-4 hidden">
+                        <div class="flex justify-between items-center mb-4 pb-2 border-b border-gray-100 flex-wrap gap-2">
+                            <div class="flex items-center gap-4">
+                                <h3 class="font-semibold text-gray-800">Results</h3>
+                                <!-- Reservoir Selector (Added) -->
+                                <select id="viz-chart-selector" class="hidden text-xs border border-gray-300 rounded p-1.5 focus:ring-blue-500 focus:border-blue-500 bg-gray-50 min-w-[150px]">
+                                </select>
+                            </div>
+                            <div class="flex gap-2">
+                                <button id="viz-copy-response" class="text-xs bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded text-gray-700">Copy JSON</button>
+                                <button id="viz-download-json" class="text-xs bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded text-gray-700">Download JSON</button>
+                                <button id="viz-copy-url" class="text-xs bg-blue-50 hover:bg-blue-100 px-2 py-1 rounded text-blue-700">Copy API URL</button>
+                            </div>
+                        </div>
+                        
+                        <div class="relative h-[300px] w-full">
+                            <canvas id="viz-chart"></canvas>
+                        </div>
+                        
+                        <!-- Raw Data Toggle -->
+                        <details class="mt-4">
+                            <summary class="text-xs text-gray-500 cursor-pointer hover:text-gray-700">View Raw API Response</summary>
+                            <pre id="viz-raw-response" class="mt-2 bg-gray-900 text-green-400 p-4 rounded text-xs font-mono max-h-60 overflow-y-auto"></pre>
+                        </details>
+                    </div>
+
+                </div>
+            </div>
+        </div>
+
+        <!-- TAB CONTENT: API EXPLORER (Full Functionality) -->
+        <div id="api-explorer" class="tab-content hidden py-6">
+            <div id="loading-spec" class="text-center py-12">
+                <div class="loading-spinner w-8 h-8 border-4 border-blue-200 border-t-blue-600 mb-4 mx-auto"></div>
+                <p class="text-gray-600">Loading API Specification...</p>
+            </div>
+            <div id="error-spec" class="hidden text-center py-12 text-red-600"></div>
+            
+            <div class="grid grid-cols-1 lg:grid-cols-4 gap-8">
+                <!-- Sidebar Nav -->
+                <aside class="lg:col-span-1">
+                    <div class="sticky top-24 space-y-4">
+                        <h3 class="font-bold text-gray-900">Endpoints</h3>
+                        <nav id="explorer-nav" class="flex flex-col space-y-1"></nav>
+                    </div>
+                </aside>
+                
+                <!-- Main API Content -->
+                <main id="explorer-content" class="lg:col-span-3 space-y-12 pb-20"></main>
+            </div>
+        </div>
+
+        <!-- TAB CONTENT: GET ACCESS -->
+        <div id="get-access" class="tab-content hidden py-6">
+             <div class="grid grid-cols-1 lg:grid-cols-4 gap-8">
+                <aside class="lg:col-span-1">
+                    <div class="sticky top-24 space-y-4">
+                        <h3 class="font-bold text-gray-900">Request Key</h3>
+                         <nav id="access-nav" class="flex flex-col space-y-1"></nav>
+                    </div>
+                </aside>
+                <main id="access-content" class="lg:col-span-3 space-y-12 pb-20"></main>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- MapLibre & PMTiles JS -->
+    <script src="https://unpkg.com/maplibre-gl@2.4.0/dist/maplibre-gl.js"></script>
+    <script src="https://unpkg.com/pmtiles@3.0.6/dist/pmtiles.js"></script>
+
+    <script>
+        // --- RESERVOIR FILTER LIST URL ---
+        const RESERVOIR_LIST_URL = "https://gist.githubusercontent.com/samapriya/75d00cf339f99e1f03900f1f1d05d4cb/raw";
+        let TARGET_NAMES = []; // Will be populated dynamically
+
+        // --- DATASET & VARIABLE DEFINITIONS ---
+        const DATASET_CONFIG = {
+            "res": ["area_m2", "depth_m", "stage_m"],
+            "nete-volume-calcs": ["E_volume", "NetE", "NetE_volume"],
+            "lem": ["E_hs", "E_nhs", "Fetch", "Lerr", "Rn", "Tw", "Tw0"],
+            "rtma": ["eto", "etr", "pr", "pres_pa", "sph_kgkg", "srad", "th", "tmmn_c", "tmmx_c", "vpd_kpa", "vs2m"]
+        };
+
+        const PMTILES_URL = 'https://storage.googleapis.com/revap-prototype-assets/revap_aoi.pmtiles';
+        const SPEC_URL = "https://gist.githubusercontent.com/samapriya/f52cc93161d871d771905393654b10b2/raw/";
+
+        // --- GLOBAL STATE ---
+        const AppState = {
+            selectedReservoirs: new Set(),
+            map: null,
+            mapLoaded: false,
+            chartInstance: null,
+            apiKey: '',
+            baseUrl: 'https://operevap.dri.edu',
+            apiSpec: null,
+            initialBounds: null
+        };
+        
+        // Store grouped chart data here
+        let groupedChartData = {};
+
+        // --- INITIALIZATION ---
+        document.addEventListener('DOMContentLoaded', async () => {
+            lucide.createIcons();
+            loadSettings();
+            initTabs();
+            initMapControlListeners();
+            
+            // 1. Fetch Reservoir List
+            try {
+                const res = await fetch(RESERVOIR_LIST_URL);
+                if(res.ok) {
+                    TARGET_NAMES = await res.json();
+                } else {
+                    console.error("Failed to load reservoir list, using empty list.");
+                }
+            } catch(e) {
+                console.error("Error loading reservoir list:", e);
+            }
+
+            // 2. Load API Spec (for API Explorer tab)
+            try {
+                const resp = await fetch(SPEC_URL);
+                if (!resp.ok) throw new Error("Failed to fetch spec");
+                AppState.apiSpec = await resp.json();
+                
+                // Render Full API Explorer
+                initApiExplorer(AppState.apiSpec);
+                
+                document.getElementById('loading-spec').classList.add('hidden');
+            } catch (e) {
+                document.getElementById('loading-spec').classList.add('hidden');
+                document.getElementById('error-spec').textContent = `Error loading spec: ${e.message}`;
+                document.getElementById('error-spec').classList.remove('hidden');
+            }
+
+            // 3. Initialize Map (AFTER reservoir list is loaded)
+            initMap();
+
+            // 4. Set up Visual Explorer Form Listeners
+            initVisualExplorerControls();
+        });
+
+        function loadSettings() {
+            // Check Local Storage
+            const storedKey = localStorage.getItem('evap_api_key');
+            const storedUrl = localStorage.getItem('evap_api_base_url');
+            
+            // Populate if found
+            if (storedKey) {
+                AppState.apiKey = storedKey;
+                document.getElementById('global-api-key').value = storedKey;
+            }
+            if (storedUrl) {
+                AppState.baseUrl = storedUrl;
+                document.getElementById('api-base-url').value = storedUrl;
+            } else {
+                // Ensure default is set if no storage
+                document.getElementById('api-base-url').value = AppState.baseUrl;
+            }
+
+            // Save Handler
+            document.getElementById('save-settings').addEventListener('click', () => {
+                const key = document.getElementById('global-api-key').value.trim();
+                const url = document.getElementById('api-base-url').value.trim().replace(/\/$/, '');
+                
+                AppState.apiKey = key;
+                AppState.baseUrl = url || 'https://operevap.dri.edu';
+                
+                localStorage.setItem('evap_api_key', AppState.apiKey);
+                localStorage.setItem('evap_api_base_url', AppState.baseUrl);
+                
+                const status = document.getElementById('settings-status');
+                status.classList.remove('hidden');
+                setTimeout(() => status.classList.add('hidden'), 3000);
+            });
+            
+            // Copy API Key Handler
+            document.getElementById('copy-api-key').addEventListener('click', () => {
+                const key = document.getElementById('global-api-key').value;
+                if(key) {
+                    navigator.clipboard.writeText(key).then(() => {
+                        const btn = document.getElementById('copy-api-key');
+                        btn.classList.add('text-green-600', 'bg-green-100');
+                        setTimeout(() => {
+                            btn.classList.remove('text-green-600', 'bg-green-100');
+                        }, 2000);
+                    });
+                }
+            });
+
+            // Allow immediate update of base URL variable
+            document.getElementById('api-base-url').addEventListener('change', (e) => {
+                AppState.baseUrl = e.target.value.trim().replace(/\/$/, '');
+            });
+        }
+
+        function initTabs() {
+            const tabs = document.querySelectorAll('.tab');
+            const contents = document.querySelectorAll('.tab-content');
+
+            tabs.forEach(tab => {
+                tab.addEventListener('click', () => {
+                    // UI Toggle
+                    tabs.forEach(t => t.classList.remove('active', 'text-gray-900'));
+                    tabs.forEach(t => t.classList.add('text-gray-500'));
+                    tab.classList.add('active', 'text-gray-900');
+                    tab.classList.remove('text-gray-500');
+
+                    const target = tab.dataset.tabTarget;
+                    contents.forEach(c => c.classList.add('hidden'));
+                    document.querySelector(target).classList.remove('hidden');
+
+                    // Special case: Resize map if switching to Visual Explorer
+                    if (target === '#visual-explorer' && AppState.map) {
+                        setTimeout(() => AppState.map.resize(), 100);
+                    }
+                });
+            });
+        }
+
+        function initMapControlListeners() {
+            document.getElementById('resetView').addEventListener('click', () => {
+                if (AppState.map && AppState.initialBounds) {
+                    AppState.map.fitBounds(AppState.initialBounds, { padding: 50 });
+                } else if (AppState.map) {
+                    AppState.map.flyTo({ center: [-110, 40], zoom: 4 });
+                }
+            });
+        }
+
+        // --- MAP LOGIC ---
+        async function initMap() {
+            try {
+                const protocol = new pmtiles.Protocol();
+                maplibregl.addProtocol("pmtiles", protocol.tile);
+
+                // Fetch header for bounds
+                const p = new pmtiles.PMTiles(PMTILES_URL);
+                const header = await p.getHeader();
+                
+                let bounds = [[-125, 25], [-65, 50]]; 
+                if (header.minLon && header.maxLon) {
+                    bounds = [[header.minLon, header.minLat], [header.maxLon, header.maxLat]];
+                }
+                AppState.initialBounds = bounds;
+
+                const map = new maplibregl.Map({
+                    container: 'map',
+                    style: {
+                        version: 8,
+                        sources: {
+                            'carto-voyager': {
+                                type: 'raster',
+                                tiles: ['https://a.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}@2x.png'],
+                                tileSize: 256,
+                                attribution: '&copy; CARTO'
+                            },
+                            'reservoirs': {
+                                type: 'vector',
+                                url: 'pmtiles://' + PMTILES_URL,
+                                promoteId: 'NAME' // CRITICAL FIX: Use NAME as the feature ID for setFeatureState to work
+                            }
+                        },
+                        layers: [
+                            {
+                                id: 'basemap', type: 'raster', source: 'carto-voyager', minzoom: 0, maxzoom: 22
+                            },
+                            {
+                                id: 'reservoirs-fill',
+                                type: 'fill',
+                                source: 'reservoirs',
+                                'source-layer': 'revap_aoi',
+                                paint: {
+                                    'fill-color': [
+                                        'case',
+                                        ['boolean', ['feature-state', 'selected'], false],
+                                        '#db2777', // Pink 600 (Selected)
+                                        '#4f46e5'  // Indigo 600 (Default)
+                                    ],
+                                    'fill-opacity': [
+                                        'case',
+                                        ['boolean', ['feature-state', 'selected'], false],
+                                        0.8,
+                                        0.4
+                                    ]
+                                },
+                                // Apply the Filter dynamically
+                                filter: ['in', ['get', 'NAME'], ['literal', TARGET_NAMES]]
+                            },
+                            {
+                                id: 'reservoirs-line',
+                                type: 'line',
+                                source: 'reservoirs',
+                                'source-layer': 'revap_aoi',
+                                paint: {
+                                    'line-color': '#4f46e5',
+                                    'line-width': 1
+                                },
+                                // Apply the Filter dynamically
+                                filter: ['in', ['get', 'NAME'], ['literal', TARGET_NAMES]]
+                            }
+                        ]
+                    },
+                    center: [-110, 40],
+                    zoom: 4
+                });
+
+                map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'bottom-right');
+
+                map.on('load', () => {
+                    document.getElementById('map-loader').classList.add('hidden');
+                    AppState.map = map;
+                    AppState.mapLoaded = true;
+                    if(AppState.initialBounds) {
+                        map.fitBounds(AppState.initialBounds, { padding: 50 });
+                    }
+                });
+
+                // Hover Cursor
+                map.on('mousemove', 'reservoirs-fill', () => map.getCanvas().style.cursor = 'pointer');
+                map.on('mouseleave', 'reservoirs-fill', () => map.getCanvas().style.cursor = '');
+
+                // Click to Select
+                map.on('click', 'reservoirs-fill', (e) => {
+                    if (e.features.length > 0) {
+                        const feature = e.features[0];
+                        const name = feature.properties.NAME || feature.properties.name;
+                        // With promoteId, 'id' is guaranteed to be set to the NAME
+                        const id = feature.id; 
+                        
+                        if (name) {
+                            // 1. Show Popup (No Zoom)
+                            new maplibregl.Popup()
+                                .setLngLat(e.lngLat)
+                                .setHTML(generatePopupContent(feature.properties))
+                                .addTo(map);
+
+                            // 2. Toggle Selection (Highlights color)
+                            toggleReservoirSelection(name, id);
+                        }
+                    }
+                });
+
+            } catch (err) {
+                console.error("Map Init Error", err);
+                document.getElementById('map-loader').innerHTML = `<p class="text-red-500">Error loading map: ${err.message}</p>`;
+            }
+        }
+
+        // --- MAP POPUP GENERATOR ---
+        function generatePopupContent(properties) {
+             if (!properties || Object.keys(properties).length === 0) {
+                return `<p class="text-slate-500 text-center italic p-2">No properties available.</p>`;
+            }
+
+            let html = '<div class="p-2 space-y-2 max-w-xs">';
+            const titleKeys = ['NAME', 'name', 'title', 'id', 'identifier'];
+            const titleKey = titleKeys.find(k => properties[k]);
+            
+            if (titleKey) {
+                html += `
+                    <div class="pb-2 border-b border-gray-100">
+                        <h3 class="text-sm font-bold text-gray-800">${properties[titleKey]}</h3>
+                    </div>
+                `;
+            }
+
+            html += '<dl class="space-y-1 text-xs">';
+
+            for (const [key, value] of Object.entries(properties)) {
+                if (key === titleKey) continue; 
+
+                let displayValue = value;
+                if (value === null) displayValue = '<span class="text-gray-300">null</span>';
+                else if (typeof value === 'object') displayValue = `{...}`;
+                else if (String(value).startsWith('http')) displayValue = `<a href="${value}" target="_blank" class="text-blue-500 hover:underline">Link</a>`;
+
+                html += `
+                    <div class="flex justify-between gap-4">
+                        <dt class="font-medium text-gray-500 truncate" style="max-width:100px" title="${key}">${key}</dt>
+                        <dd class="text-gray-800 text-right truncate" style="max-width:120px" title="${displayValue}">${displayValue}</dd>
+                    </div>
+                `;
+            }
+
+            html += '</dl></div>';
+            return html;
+        }
+
+        // --- SELECTION LOGIC ---
+        function toggleReservoirSelection(name, id) {
+            // Update Set
+            if (AppState.selectedReservoirs.has(name)) {
+                AppState.selectedReservoirs.delete(name);
+                // When we remove, we set selected=false
+                if (id !== undefined) setFeatureState(id, false);
+            } else {
+                AppState.selectedReservoirs.add(name);
+                // When we add, we set selected=true
+                if (id !== undefined) setFeatureState(id, true);
+            }
+
+            updateSelectedUI();
+        }
+
+        function setFeatureState(id, isSelected) {
+            if (AppState.map) {
+                AppState.map.setFeatureState(
+                    { source: 'reservoirs', sourceLayer: 'revap_aoi', id: id },
+                    { selected: isSelected }
+                );
+            }
+        }
+
+        function updateSelectedUI() {
+            const listEl = document.getElementById('selected-reservoirs-list');
+            const countEl = document.getElementById('res-count');
+            const clearBtn = document.getElementById('clear-selection');
+            const count = AppState.selectedReservoirs.size;
+
+            countEl.textContent = count;
+            
+            if (count === 0) {
+                listEl.innerHTML = '<span class="italic p-1">Select reservoirs on the map...</span>';
+                clearBtn.classList.add('hidden');
+            } else {
+                listEl.innerHTML = '';
+                AppState.selectedReservoirs.forEach(name => {
+                    const tag = document.createElement('span');
+                    tag.className = 'bg-blue-50 text-blue-700 px-2 py-1 rounded border border-blue-200 flex items-center gap-1';
+                    tag.innerHTML = `${name} <button onclick="removeReservoir('${name}')" class="hover:text-red-600"><i data-lucide="x" class="w-3 h-3"></i></button>`;
+                    listEl.appendChild(tag);
+                });
+                lucide.createIcons();
+                clearBtn.classList.remove('hidden');
+            }
+        }
+
+        window.removeReservoir = (name) => {
+            // Note: Since we use the name as ID (via promoteId), we can toggle state by passing the name as ID
+            toggleReservoirSelection(name, name);
+        };
+
+        document.getElementById('clear-selection').addEventListener('click', () => {
+            // Unselect all visually
+            AppState.selectedReservoirs.forEach(name => {
+                 setFeatureState(name, false);
+            });
+            AppState.selectedReservoirs.clear();
+            updateSelectedUI();
+        });
+
+        // --- VISUAL EXPLORER CONTROLS ---
+        function initVisualExplorerControls() {
+            const datasetSelect = document.getElementById('viz-dataset');
+            const variablesContainer = document.getElementById('viz-variables-container');
+            const variablesList = document.getElementById('viz-variables-list');
+            const runBtn = document.getElementById('run-visual-query');
+            const chartSelector = document.getElementById('viz-chart-selector');
+
+            // 1. Dataset Change
+            datasetSelect.addEventListener('change', (e) => {
+                const dataset = e.target.value;
+                let variables = [];
+
+                if (dataset === 'all') {
+                    const allVars = new Set();
+                    Object.values(DATASET_CONFIG).forEach(vars => vars.forEach(v => allVars.add(v)));
+                    variables = Array.from(allVars).sort();
+                } else {
+                    variables = DATASET_CONFIG[dataset];
+                }
+                
+                variablesList.innerHTML = '';
+                if (variables) {
+                    variables.forEach(v => {
+                        const label = document.createElement('label');
+                        label.className = 'flex items-center gap-2 cursor-pointer hover:bg-gray-100 p-1 rounded';
+                        label.innerHTML = `
+                            <input type="checkbox" value="${v}" class="viz-var-checkbox text-blue-600 rounded focus:ring-blue-500">
+                            <span class="truncate" title="${v}">${v}</span>
+                        `;
+                        variablesList.appendChild(label);
+                    });
+                    variablesContainer.classList.remove('opacity-50', 'pointer-events-none');
+                } else {
+                    variablesContainer.classList.add('opacity-50', 'pointer-events-none');
+                }
+            });
+
+            // 2. Select/Deselect All
+            document.getElementById('select-all-vars').addEventListener('click', () => {
+                document.querySelectorAll('.viz-var-checkbox').forEach(cb => cb.checked = true);
+            });
+            document.getElementById('deselect-all-vars').addEventListener('click', () => {
+                document.querySelectorAll('.viz-var-checkbox').forEach(cb => cb.checked = false);
+            });
+            
+            // Reservoir Selector Change Event
+            chartSelector.addEventListener('change', (e) => {
+                const selectedResName = e.target.value;
+                if (groupedChartData[selectedResName]) {
+                    renderChartSubset(groupedChartData[selectedResName]);
+                }
+            });
+
+            // 3. Run Query
+            runBtn.addEventListener('click', async () => {
+                // Validation
+                if (AppState.selectedReservoirs.size === 0) {
+                    alert("Please select at least one reservoir from the map.");
+                    return;
+                }
+                const dataset = datasetSelect.value;
+                if (!dataset) {
+                    alert("Please select a dataset.");
+                    return;
+                }
+                const checkedVars = Array.from(document.querySelectorAll('.viz-var-checkbox:checked')).map(cb => cb.value);
+                if (checkedVars.length === 0) {
+                    alert("Please select at least one variable.");
+                    return;
+                }
+
+                // Prepare Params
+                const reservoirs = Array.from(AppState.selectedReservoirs).join(',');
+                const variables = checkedVars.join(',');
+                const startDate = document.getElementById('viz-start-date').value;
+                const endDate = document.getElementById('viz-end-date').value;
+
+                // Handle 'all' datasets selection
+                let datasetParam = dataset;
+                if (dataset === 'all') {
+                    datasetParam = Object.keys(DATASET_CONFIG).join(',');
+                }
+
+                // Construct URL
+                // /timeseries/daily/reservoirs/daterange
+                const endpoint = '/timeseries/daily/reservoirs/daterange';
+                const query = new URLSearchParams({
+                    RES_NAMES: reservoirs,
+                    datasets: datasetParam, // The API expects 'datasets' (plural) but takes the single selection here
+                    variables: variables,
+                    units: 'metric',
+                    start_date: startDate,
+                    end_date: endDate,
+                    output_format: 'json'
+                });
+
+                const fullUrl = `${AppState.baseUrl}${endpoint}?${query.toString()}`;
+                
+                // UI Updates
+                runBtn.disabled = true;
+                runBtn.innerHTML = '<div class="loading-spinner border-t-white w-4 h-4"></div> Fetching...';
+                document.getElementById('visual-results').classList.remove('hidden');
+                
+                // Set Copy URL
+                AppState.lastQueryUrl = fullUrl;
+
+                try {
+                    const headers = {};
+                    if (AppState.apiKey) headers['api-key'] = AppState.apiKey.replace(/[^\x00-\x7F]/g, "");
+
+                    const response = await fetch(fullUrl, { headers });
+                    if (!response.ok) throw new Error(`API Error: ${response.status} ${response.statusText}`);
+                    
+                    const data = await response.json();
+                    
+                    // Render Raw
+                    document.getElementById('viz-raw-response').textContent = JSON.stringify(data, null, 2);
+                    
+                    // Render Chart
+                    renderVisualChart(data);
+
+                } catch (err) {
+                    document.getElementById('viz-raw-response').textContent = `Error: ${err.message}`;
+                    // Clear chart
+                    if (AppState.chartInstance) AppState.chartInstance.destroy();
+                } finally {
+                    runBtn.disabled = false;
+                    runBtn.innerHTML = '<i data-lucide="play" class="w-4 h-4 mr-2"></i> Fetch Time Series';
+                    lucide.createIcons();
+                }
+            });
+
+            // Helper Buttons
+            document.getElementById('viz-copy-url').addEventListener('click', (e) => {
+                if(AppState.lastQueryUrl) {
+                    navigator.clipboard.writeText(AppState.lastQueryUrl);
+                    e.target.textContent = "Copied!";
+                    setTimeout(() => e.target.textContent = "Copy API URL", 2000);
+                }
+            });
+            
+            document.getElementById('viz-copy-response').addEventListener('click', (e) => {
+                const content = document.getElementById('viz-raw-response').textContent;
+                if(content && !content.startsWith('Error')) {
+                    navigator.clipboard.writeText(content);
+                    e.target.textContent = "Copied!";
+                    setTimeout(() => e.target.textContent = "Copy JSON", 2000);
+                }
+            });
+            
+            document.getElementById('viz-download-json').addEventListener('click', () => {
+                const content = document.getElementById('viz-raw-response').textContent;
+                if(!content || content.startsWith('Error')) return;
+                const blob = new Blob([content], {type: 'application/json'});
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'reservoir_data.json';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+            });
+        }
+
+        // --- CHARTING ---
+        function renderVisualChart(data) {
+            const selector = document.getElementById('viz-chart-selector');
+            
+            // Clear previous global state
+            groupedChartData = {};
+            selector.innerHTML = '';
+            selector.classList.add('hidden');
+
+            if (!Array.isArray(data) || data.length === 0) {
+                if (AppState.chartInstance) AppState.chartInstance.destroy();
+                return;
+            }
+
+            // Check for RES_NAME to group
+            const first = data[0];
+            if (first.hasOwnProperty('RES_NAME')) {
+                data.forEach(item => {
+                    const name = item.RES_NAME;
+                    if (!groupedChartData[name]) groupedChartData[name] = [];
+                    groupedChartData[name].push(item);
+                });
+            } else {
+                // Fallback if no RES_NAME, treat as single group
+                groupedChartData['Data'] = data;
+            }
+
+            const reservoirNames = Object.keys(groupedChartData);
+
+            if (reservoirNames.length > 1) {
+                // Populate selector
+                reservoirNames.forEach(name => {
+                    const option = document.createElement('option');
+                    option.value = name;
+                    option.textContent = name;
+                    selector.appendChild(option);
+                });
+                selector.classList.remove('hidden');
+                
+                // Render first by default
+                renderChartSubset(groupedChartData[reservoirNames[0]]);
+            } else {
+                // Just render the single dataset available
+                renderChartSubset(data);
+            }
+        }
+        
+        function renderChartSubset(data) {
+            const ctx = document.getElementById('viz-chart').getContext('2d');
+            
+            if (AppState.chartInstance) {
+                AppState.chartInstance.destroy();
+            }
+            
+            if (!Array.isArray(data) || data.length === 0) return;
+
+            // Find Date Key
+            const first = data[0];
+            const dateKey = Object.keys(first).find(k => /date|time/i.test(k) && !/start|end/i.test(k)) || 'start_date'; // Fallback to start_date if found, else guess
+            
+            // Find Numeric Keys (Variables)
+            // Exclude non-numeric and date parts and metadata
+            const numericKeys = Object.keys(first).filter(k => 
+                typeof first[k] === 'number' && 
+                k !== dateKey && 
+                !/year|month|day/i.test(k)
+            );
+
+            const labels = data.map(d => d[dateKey]);
+            const datasets = numericKeys.map((key, i) => {
+                const colors = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6'];
+                const color = colors[i % colors.length];
+                return {
+                    label: key,
+                    data: data.map(d => d[key]),
+                    borderColor: color,
+                    backgroundColor: color + '20',
+                    borderWidth: 2,
+                    tension: 0.2,
+                    pointRadius: 0,
+                    pointHoverRadius: 4
+                };
+            });
+
+            AppState.chartInstance = new Chart(ctx, {
+                type: 'line',
+                data: { labels, datasets },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: { mode: 'index', intersect: false },
+                    plugins: {
+                        legend: { position: 'top' },
+                        tooltip: { enabled: true }
+                    },
+                    scales: {
+                        x: { grid: { display: false } },
+                        y: { title: { display: true, text: 'Value' } }
+                    }
+                }
+            });
+        }
+
+
+        // --- ROBUST API EXPLORER LOGIC (Imported functionality) ---
+        function initApiExplorer(spec) {
+            // Group paths by tag
+            const explorerTags = ['help', 'metadata', 'timeseries'];
+            const accessTags = ['auth'];
+            
+            const groupedPaths = {};
+            Object.entries(spec.paths).forEach(([path, methods]) => {
+                Object.entries(methods).forEach(([method, details]) => {
+                    const tags = details.tags || ['default'];
+                    const tag = tags[0].toLowerCase(); 
+                    if (!groupedPaths[tag]) groupedPaths[tag] = [];
+                    groupedPaths[tag].push({ path, method, details });
+                });
+            });
+
+            // 1. Render Explorer Tab
+            const explorerMain = document.getElementById('explorer-content');
+            const explorerNav = document.getElementById('explorer-nav');
+            
+            explorerTags.forEach(tag => {
+                if(groupedPaths[tag]) {
+                    renderApiSection(tag, groupedPaths[tag], explorerMain, explorerNav, 'explorer');
+                }
+            });
+
+            // 2. Render Access Tab
+            const accessMain = document.getElementById('access-content');
+            const accessNav = document.getElementById('access-nav');
+            
+            accessTags.forEach(tag => {
+                if(groupedPaths[tag]) {
+                    renderApiSection(tag, groupedPaths[tag], accessMain, accessNav, 'access');
+                }
+            });
+
+            // Set up event listeners for the generated UI
+            setupApiExplorerListeners();
+        }
+
+        function renderApiSection(tagName, paths, mainContainer, navContainer, prefix) {
+            const sectionId = `${prefix}-section-${tagName}`;
+            
+            // Add to Nav
+            const navLink = document.createElement('a');
+            navLink.href = `#${sectionId}`;
+            navLink.className = 'block px-3 py-2 rounded text-sm text-gray-600 hover:bg-gray-100 capitalize';
+            navLink.textContent = tagName;
+            navLink.addEventListener('click', (e) => {
+                e.preventDefault();
+                document.getElementById(sectionId).scrollIntoView({behavior: 'smooth'});
+            });
+            navContainer.appendChild(navLink);
+
+            // Add to Main Content
+            const section = document.createElement('section');
+            section.id = sectionId;
+            section.className = 'scroll-mt-24';
+            section.innerHTML = `
+                <h2 class="text-2xl font-bold mb-6 capitalize pb-2 border-b border-gray-200 text-gray-800">${tagName}</h2>
+                <div class="space-y-6 endpoints-container">
+                    ${paths.map(p => renderApiEndpoint(p.path, p.method, p.details)).join('')}
+                </div>
+            `;
+            mainContainer.appendChild(section);
+        }
+
+        function renderApiEndpoint(path, method, details) {
+            const methodColors = { 
+                get: 'bg-blue-100 text-blue-800', 
+                post: 'bg-green-100 text-green-800', 
+                put: 'bg-orange-100 text-orange-800', 
+                delete: 'bg-red-100 text-red-800' 
+            };
+            const colorClass = methodColors[method] || 'bg-gray-100';
+
+            // Flatten params for display
+            let allParams = [...(details.parameters || [])];
+            
+            // Handle Multipart Form Data
+            if (details.requestBody && details.requestBody.content['multipart/form-data']) {
+                const schema = details.requestBody.content['multipart/form-data'].schema;
+                if (schema && schema.$ref) {
+                     const refName = schema.$ref.split('/').pop();
+                     const componentSchema = AppState.apiSpec.components.schemas[refName];
+                     if(componentSchema && componentSchema.properties) {
+                         Object.entries(componentSchema.properties).forEach(([propName, propDetails]) => {
+                             allParams.push({
+                                 name: propName, in: 'formData', schema: propDetails, required: false
+                             });
+                         });
+                     }
+                }
+            }
+
+            return `
+            <div class="border border-gray-200 rounded-lg overflow-hidden bg-white shadow-sm endpoint-container">
+                <div class="p-4 flex items-center gap-4 cursor-pointer hover:bg-gray-50 transition endpoint-header">
+                    <span class="uppercase font-mono text-xs font-bold px-2 py-1 rounded ${colorClass} w-16 text-center">${method}</span>
+                    <span class="font-mono text-sm font-medium text-gray-700 break-all">${path}</span>
+                    <span class="text-sm text-gray-500 ml-auto hidden sm:block">${details.summary}</span>
+                    <span class="arrow-icon ml-2 text-gray-400">▼</span>
+                </div>
+                <div class="hidden border-t border-gray-100 p-6 bg-gray-50 endpoint-body">
+                    <div class="prose prose-sm max-w-none text-gray-600 mb-4">${marked.parse(details.description || '')}</div>
+                    
+                    ${allParams.length > 0 ? `
+                        <h4 class="text-xs font-bold uppercase text-gray-500 mb-2">Parameters</h4>
+                        <form class="space-y-3 mb-6 parameter-form">
+                             ${allParams.map(p => renderApiParamInput(p)).join('')}
+                        </form>
+                    ` : ''}
+
+                    <div class="flex items-center gap-3 border-t border-gray-200 pt-4">
+                        <button class="try-it-out-btn bg-blue-600 text-white px-4 py-2 rounded text-sm font-medium hover:bg-blue-700 flex items-center gap-2" data-path="${path}" data-method="${method}">
+                            <span class="loading-spinner hidden border-t-white"></span>
+                            <span>Execute</span>
+                        </button>
+                        <button class="clear-btn bg-white border border-gray-300 text-gray-700 px-3 py-2 rounded text-sm hover:bg-gray-50">Clear</button>
+                    </div>
+
+                    <div class="response-container mt-6 hidden">
+                         <div class="mb-2 flex justify-between items-end">
+                            <span class="text-xs font-bold uppercase text-gray-500">Response</span>
+                            <span class="response-status text-xs font-mono"></span>
+                        </div>
+                        <pre class="bg-gray-900 text-green-400 p-4 rounded text-xs font-mono overflow-auto max-h-96 response-code"></pre>
+                        <div class="api-chart-container mt-4 hidden h-64 relative bg-white border border-gray-200 rounded p-2">
+                            <canvas></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            `;
+        }
+
+        function renderApiParamInput(param) {
+            const isRequired = param.required;
+            const defaultValue = param.schema?.default !== undefined ? param.schema.default : '';
+            
+            let inputHtml = '';
+            if (param.in === 'formData' && param.schema.format === 'binary') {
+                inputHtml = `<input type="file" name="${param.name}" data-in="${param.in}" class="block w-full text-sm text-gray-500 file:mr-4 file:py-1 file:px-2 file:rounded file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100">`;
+            } else if (param.schema?.enum) {
+                inputHtml = `
+                <select name="${param.name}" data-in="${param.in}" class="w-full p-2 border border-gray-300 rounded text-sm">
+                    <option value="">Select...</option>
+                    ${param.schema.enum.map(val => `<option value="${val}" ${val === defaultValue ? 'selected' : ''}>${val}</option>`).join('')}
+                </select>`;
+            } else {
+                 inputHtml = `<input type="text" name="${param.name}" value="${defaultValue}" placeholder="${defaultValue}" data-in="${param.in}" class="w-full p-2 border border-gray-300 rounded text-sm" ${isRequired ? 'required' : ''}>`;
+            }
+
+            return `
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-2 items-center">
+                <label class="text-sm font-medium text-gray-700 break-words">${param.name} ${isRequired ? '<span class="text-red-500">*</span>' : ''} <span class="text-xs font-normal text-gray-400 ml-1">(${param.in})</span></label>
+                <div class="md:col-span-2">${inputHtml}</div>
+            </div>`;
+        }
+
+        function setupApiExplorerListeners() {
+            // Toggle Accordion
+            document.querySelectorAll('.endpoint-header').forEach(header => {
+                header.addEventListener('click', () => {
+                    const body = header.nextElementSibling;
+                    const arrow = header.querySelector('.arrow-icon');
+                    body.classList.toggle('hidden');
+                    if (arrow) arrow.style.transform = body.classList.contains('hidden') ? 'rotate(0deg)' : 'rotate(180deg)';
+                });
+            });
+
+            // Execute Request
+            document.querySelectorAll('.try-it-out-btn').forEach(btn => {
+                btn.addEventListener('click', async (e) => {
+                    e.stopPropagation();
+                    await handleApiRequest(btn);
+                });
+            });
+            
+             // Clear
+            document.querySelectorAll('.clear-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                     e.stopPropagation();
+                     const container = btn.closest('.endpoint-body').querySelector('.response-container');
+                     container.classList.add('hidden');
+                     container.querySelector('.response-code').textContent = '';
+                });
+            });
+        }
+
+        async function handleApiRequest(button) {
+            const container = button.closest('.endpoint-body');
+            const form = container.querySelector('.parameter-form');
+            const respContainer = container.querySelector('.response-container');
+            const codeBlock = respContainer.querySelector('.response-code');
+            const statusEl = respContainer.querySelector('.response-status');
+            const spinner = button.querySelector('.loading-spinner');
+            const canvas = respContainer.querySelector('canvas');
+            const chartContainer = respContainer.querySelector('.api-chart-container');
+
+            button.disabled = true;
+            spinner.classList.remove('hidden');
+            respContainer.classList.remove('hidden');
+            chartContainer.classList.add('hidden');
+            codeBlock.textContent = 'Loading...';
+
+            try {
+                const method = button.dataset.method.toUpperCase();
+                let url = AppState.baseUrl + button.dataset.path;
+                const queryParams = new URLSearchParams();
+                const formData = new FormData();
+                let useFormData = false;
+
+                if (form) {
+                    const inputs = form.querySelectorAll('input, select');
+                    inputs.forEach(input => {
+                        if(!input.name || (!input.value && input.type !== 'file')) return;
+                        
+                        if (input.dataset.in === 'path') {
+                            url = url.replace(`{${input.name}}`, encodeURIComponent(input.value));
+                        } else if (input.dataset.in === 'query') {
+                            queryParams.append(input.name, input.value);
+                        } else if (input.dataset.in === 'formData') {
+                             useFormData = true;
+                             if(input.type === 'file' && input.files.length > 0) {
+                                 formData.append(input.name, input.files[0]);
+                             } else {
+                                 formData.append(input.name, input.value);
+                             }
+                        }
+                    });
+                }
+
+                const fullUrl = `${url}${queryParams.toString() ? '?' + queryParams.toString() : ''}`;
+                const headers = {};
+                
+                // Use Global Key
+                if (AppState.apiKey) {
+                     headers['api-key'] = AppState.apiKey.replace(/[^\x00-\x7F]/g, "");
+                }
+
+                const options = { method, headers };
+                if (useFormData) options.body = formData;
+
+                const response = await fetch(fullUrl, options);
+                statusEl.textContent = `${response.status} ${response.statusText}`;
+                statusEl.className = `response-status text-xs font-mono font-bold px-2 py-1 rounded ${response.ok ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`;
+
+                const data = await response.json();
+                codeBlock.textContent = JSON.stringify(data, null, 2);
+
+                // Simple Chart Check for API Explorer
+                if (response.ok && Array.isArray(data) && data.length > 0 && data[0].date) {
+                    chartContainer.classList.remove('hidden');
+                    renderVisualChartInContainer(canvas, data); // Reuse chart logic if possible or simplified version
+                }
+
+            } catch (err) {
+                codeBlock.textContent = `Error: ${err.message}`;
+                statusEl.textContent = 'Network Error';
+                statusEl.className = 'bg-red-100 text-red-800 px-2 py-1 rounded text-xs';
+            } finally {
+                button.disabled = false;
+                spinner.classList.add('hidden');
+            }
+        }
+        
+        // Simplified chart render for API Explorer tab specifically
+        function renderVisualChartInContainer(canvas, data) {
+             const ctx = canvas.getContext('2d');
+             // Destroy existing if any attached to this canvas
+             const existing = Chart.getChart(canvas);
+             if(existing) existing.destroy();
+             
+             // Reuse the main charting logic, but we need to ensure labels/datasets extraction is generic
+             const first = data[0];
+             const dateKey = Object.keys(first).find(k => /date|time/i.test(k));
+             if (!dateKey) return;
+             
+             const numericKeys = Object.keys(first).filter(k => typeof first[k] === 'number' && k !== dateKey);
+             const labels = data.map(d => d[dateKey]);
+             
+             new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels,
+                    datasets: numericKeys.map((k, i) => ({
+                        label: k,
+                        data: data.map(d => d[k]),
+                        borderColor: ['#3B82F6', '#10B981'][i%2],
+                        tension: 0.2,
+                        pointRadius: 1
+                    }))
+                },
+                options: { responsive: true, maintainAspectRatio: false }
+             });
+        }
+    </script>
+</body>
+</html>
